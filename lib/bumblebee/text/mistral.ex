@@ -364,6 +364,7 @@ defmodule Bumblebee.Text.Mistral do
       output_use_bias: false,
       output_hidden_states: spec.output_hidden_states,
       output_attentions: spec.output_attentions,
+      quantization_config: spec.quantization_config,
       name: join(name, "blocks")
     )
   end

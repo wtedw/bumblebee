@@ -57,7 +57,8 @@ defmodule Bumblebee.Layers.Transformer do
       :layer_norm,
       :block_type,
       :scale_attention_weights,
-      :rotary_embedding
+      :rotary_embedding,
+      :quantization_config
     ]
 
     opts =
@@ -320,7 +321,8 @@ defmodule Bumblebee.Layers.Transformer do
         block_type: :standard,
         layer_norm: [],
         scale_attention_weights: true,
-        rotary_embedding: nil
+        rotary_embedding: nil,
+        quantization_config: nil
       ])
 
     name = opts[:name]
@@ -349,6 +351,7 @@ defmodule Bumblebee.Layers.Transformer do
     block_type = opts[:block_type]
     scale_attention_weights = opts[:scale_attention_weights]
     rotary_embedding = opts[:rotary_embedding]
+    quantization_config = opts[:quantization_config]
 
     ffn_fun =
       case ffn do
@@ -406,6 +409,7 @@ defmodule Bumblebee.Layers.Transformer do
           output_use_bias: output_use_bias,
           scale_attention_weights: scale_attention_weights,
           rotary_embedding: rotary_embedding,
+          quantization_config: quantization_config,
           name: join(name, "self_attention")
         )
 
@@ -450,6 +454,7 @@ defmodule Bumblebee.Layers.Transformer do
           output_use_bias: output_use_bias,
           scale_attention_weights: scale_attention_weights,
           rotary_embedding: rotary_embedding,
+          quantization_config: quantization_config,
           name: join(name, "cross_attention")
         )
 
@@ -736,7 +741,8 @@ defmodule Bumblebee.Layers.Transformer do
         key_use_bias: true,
         value_use_bias: true,
         output_use_bias: true,
-        rotary_embedding: nil
+        rotary_embedding: nil,
+        quantization_config: nil,
       ])
 
     attention_mask = opts[:attention_mask]
@@ -764,6 +770,9 @@ defmodule Bumblebee.Layers.Transformer do
     attention_head_size = opts[:attention_head_size] || div(hidden_size, num_heads)
     inner_size = num_heads * attention_head_size
     inner_kv_size = num_key_value_heads * attention_head_size
+
+    quantization_config = opts[:quantization_config]
+    |> IO.inspect(label: "mha qc")
 
     query =
       query
