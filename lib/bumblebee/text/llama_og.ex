@@ -1,4 +1,4 @@
-defmodule Bumblebee.Text.Mistral do
+defmodule Bumblebee.Text.LlamaOg do
   alias Bumblebee.Shared
 
   options =
@@ -11,7 +11,7 @@ defmodule Bumblebee.Text.Mistral do
         """
       ],
       max_positions: [
-        default: 131_072,
+        default: 1024,
         doc: """
         the vocabulary size of the position embedding. This corresponds to the maximum sequence
         length that this model can process. Typically this is set to a large value just in case,
@@ -23,7 +23,7 @@ defmodule Bumblebee.Text.Mistral do
         doc: "the dimensionality of hidden layers"
       ],
       intermediate_size: [
-        default: 14336,
+        default: 11008,
         doc: "the dimensionality of intermediate layers"
       ],
       num_blocks: [
@@ -35,17 +35,28 @@ defmodule Bumblebee.Text.Mistral do
         doc: "the number of attention heads for each attention layer in the model"
       ],
       num_key_value_heads: [
-        default: 8,
-        doc: """
-        the number of key-value heads used to implement Grouped Query Attention. If
-        this value is set to the same as the number of attention heads, it will use
-        regular MHA. If it's set to 1, it will use MQA, otherwise it uses Grouped Query
-        Attention
-        """
+        default: nil,
+        doc: "the number of key value heads for each attention layer in the model"
       ],
       activation: [
         default: :silu,
         doc: "the activation function"
+      ],
+      rotary_embedding_base: [
+        default: 10_000,
+        doc: "base for computing rotary embedding frequency"
+      ],
+      rotary_embedding_scaling_strategy: [
+        default: nil,
+        doc: """
+        scaling configuration for rotary embedding. Currently the supported values are:
+
+          * `%{type: :linear, factor: number()}`
+
+          * `%{type: :dynamic, factor: number()}`
+
+        For more details see https://www.reddit.com/r/LocalLLaMA/comments/14mrgpr/dynamically_scaled_rope_further_increases
+        """
       ],
       layer_norm_epsilon: [
         default: 1.0e-12,
@@ -55,14 +66,6 @@ defmodule Bumblebee.Text.Mistral do
         default: 0.02,
         doc:
           "the standard deviation of the normal initializer used for initializing kernel parameters"
-      ],
-      rotary_embedding_base: [
-        default: 10_000,
-        doc: "base for computing rotary embedding frequency"
-      ],
-      quantization_config: [
-        default: nil,
-        doc: "quant stuff"
       ]
     ] ++
       Shared.common_options([
@@ -73,17 +76,17 @@ defmodule Bumblebee.Text.Mistral do
       ]) ++ Shared.token_options(pad_token_id: 0)
 
   @moduledoc """
-  Mistral model family.
+  LLaMA model family.
 
   ## Architectures
 
-    * `:base` - plain Mistral without any head on top
+    * `:base` - plain LLaMA without any head on top
 
-    * `:for_causal_language_modeling` - Mistral with a language modeling
+    * `:for_causal_language_modeling` - LLaMA with a language modeling
       head. The head returns logits for each token in the original
       sequence
 
-    * `:for_sequence_classification` - Mistral with a sequence
+    * `:for_sequence_classification` - LLaMA with a sequence
       classification head. The head returns logits corresponding to
       possible classes
 
@@ -184,26 +187,6 @@ defmodule Bumblebee.Text.Mistral do
     |> Layers.output()
   end
 
-  def model(
-        %__MODULE__{
-          architecture: :for_causal_language_modeling,
-          quantization_config: %{quant_method: "gptq"}
-        } = spec
-      ) do
-    inputs = inputs(spec)
-
-    IO.inspect(spec, label: "specaroo")
-    outputs = core(inputs, spec)
-    logits = language_modeling_head(outputs.hidden_state, spec, name: "language_modeling_head")
-
-    Layers.output(%{
-      logits: logits,
-      hidden_states: outputs.hidden_states,
-      attentions: outputs.attentions,
-      cache: outputs.cache
-    })
-  end
-
   def model(%__MODULE__{architecture: :for_causal_language_modeling} = spec) do
     inputs = inputs(spec)
 
@@ -301,8 +284,7 @@ defmodule Bumblebee.Text.Mistral do
     hidden_state =
       Layers.rms_norm(decoder_outputs.hidden_state,
         name: "output_norm",
-        epsilon: spec.layer_norm_epsilon,
-        type: {:f, 16}
+        epsilon: spec.layer_norm_epsilon
       )
 
     %{
@@ -316,13 +298,10 @@ defmodule Bumblebee.Text.Mistral do
   defp embedder(input_ids, input_embeddings, spec, opts) do
     name = opts[:name]
 
-    # TODO: Axon needs a way to specify ignoring pad tokens
-    # in gradient
     Layers.default input_embeddings do
       Axon.embedding(input_ids, spec.vocab_size, spec.hidden_size,
         kernel_initializer: kernel_initializer(spec),
-        name: join(name, "token_embedding"),
-        type: {:f, 16}
+        name: join(name, "token_embedding")
       )
     end
   end
@@ -337,7 +316,6 @@ defmodule Bumblebee.Text.Mistral do
          opts
        ) do
     name = opts[:name]
-    quantization_config = spec.quantization_config
 
     Layers.Transformer.blocks(hidden_state,
       attention_mask: attention_mask,
@@ -348,15 +326,9 @@ defmodule Bumblebee.Text.Mistral do
       num_key_value_heads: spec.num_key_value_heads,
       hidden_size: spec.hidden_size,
       kernel_initializer: kernel_initializer(spec),
-      layer_norm:
-        &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:f, 16}),
+      layer_norm: &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon),
       ffn:
-        &gated_ffn(
-          &1,
-          spec.intermediate_size,
-          spec.hidden_size,
-          spec.num_key_value_heads,
-          quantization_config,
+        &gated_ffn(&1, spec.intermediate_size, spec.hidden_size,
           name: &2,
           activation: spec.activation
         ),
@@ -365,7 +337,8 @@ defmodule Bumblebee.Text.Mistral do
       rotary_embedding: [
         position_ids: position_ids,
         max_positions: spec.max_positions,
-        base: spec.rotary_embedding_base
+        base: spec.rotary_embedding_base,
+        scaling_strategy: spec.rotary_embedding_scaling_strategy
       ],
       query_use_bias: false,
       key_use_bias: false,
@@ -373,12 +346,11 @@ defmodule Bumblebee.Text.Mistral do
       output_use_bias: false,
       output_hidden_states: spec.output_hidden_states,
       output_attentions: spec.output_attentions,
-      quantization_config: spec.quantization_config,
       name: join(name, "blocks")
     )
   end
 
-  defp gated_ffn(hidden_state, intermediate_size, output_size, num_key_value_heads, nil, opts) do
+  defp gated_ffn(hidden_state, intermediate_size, output_size, opts) do
     name = opts[:name]
     activation = opts[:activation]
 
@@ -395,56 +367,13 @@ defmodule Bumblebee.Text.Mistral do
     Axon.dense(hidden_state, output_size, name: join(name, "output"), use_bias: false)
   end
 
-  defp gated_ffn(
-         hidden_state,
-         intermediate_size,
-         output_size,
-         num_key_value_heads,
-         quantization_config,
-         opts
-       ) do
-    name = opts[:name]
-    activation = opts[:activation]
-
-    gptq_config = %{
-      origin: "gated_ffn",
-      num_key_value_heads: num_key_value_heads,
-      intermediate_size: intermediate_size,
-      output_size: output_size
-    }
-
-    intermediate =
-      Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
-        name: join(name, "intermediate")
-      )
-
-    gate =
-      Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
-        name: join(name, "gate")
-      )
-
-    hidden_state = Axon.multiply(intermediate, Axon.activation(gate, activation))
-
-    Layers.dense_quantized(hidden_state, output_size, gptq_config, quantization_config,
-      name: join(name, "output")
-    )
-  end
-
   defp language_modeling_head(hidden_state, spec, opts) do
     name = opts[:name]
 
     # TODO: Tie lm-head to word embedding as a spec option
-    # Axon.dense(hidden_state, spec.vocab_size,
-    #   kernel_initializer: kernel_initializer(spec),
-    #   name: join(name, "output"),
-    #   use_bias: false,
-    #   type: {:bf, 16}
-    # )
     Layers.dense_transposed(hidden_state, spec.vocab_size,
       kernel_initializer: kernel_initializer(spec),
-      name: join(name, "output"),
-      # use_bias: false,
-      type: {:f, 16}
+      name: join(name, "output")
     )
   end
 
@@ -456,34 +385,18 @@ defmodule Bumblebee.Text.Mistral do
     def load(spec, data) do
       import Shared.Converters
 
-      # quant_value_converters = %{
-      #       "bits" => number(),
-      #       "group_size" => number(),
-      #       "damp_percent" => number(),
-      # "desc_act" => boolean(),
-      # "sym" => boolean(),
-      # "true_sequential" => boolean(),
-      # "model_name_or_path" => optional(),
-      # "model_file_base_name" => string()
-      # }
+      scaling_strategy_converter = fn name, value ->
+        case value do
+          %{"type" => "linear", "factor" => factor} when is_number(factor) ->
+            {:ok, %{type: :linear, factor: factor}}
 
-      IO.inspect(data, label: "data")
+          %{"type" => "dynamic", "factor" => factor} when is_number(factor) ->
+            {:ok, %{type: :dynamic, factor: factor}}
 
-      quant_opts =
-        convert!(data["quantization_config"],
-          bits: {"bits", number()},
-          group_size: {"group_size", number()},
-          damp_percent: {"damp_percent", number()},
-          desc_act: {"desc_act", boolean()},
-          sym: {"sym", boolean()},
-          true_sequential: {"true_sequential", boolean()},
-          model_name_or_path: {"model_name_or_path", optional(string())},
-          model_file_base_name: {"model_file_base_name", string()},
-          quant_method: {"quant_method", string()}
-        )
-        |> Enum.into(%{})
-
-      IO.inspect(quant_opts, label: "quantopts")
+          _other ->
+            {:error, "invalid format for #{inspect(name)}, got: #{inspect(value)}"}
+        end
+      end
 
       opts =
         convert!(data,
@@ -496,11 +409,11 @@ defmodule Bumblebee.Text.Mistral do
           intermediate_size: {"intermediate_size", number()},
           activation: {"hidden_act", activation()},
           rotary_embedding_base: {"rope_theta", number()},
+          rotary_embedding_scaling_strategy:
+            {"rope_scaling", optional(scaling_strategy_converter)},
           initializer_scale: {"initializer_range", number()},
           layer_norm_epsilon: {"rms_norm_eps", number()}
-        ) ++
-          Shared.common_options_from_transformers(data, spec) ++
-          [quantization_config: quant_opts]
+        ) ++ Shared.common_options_from_transformers(data, spec)
 
       @for.config(spec, opts)
     end

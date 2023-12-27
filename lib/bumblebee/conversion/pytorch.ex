@@ -55,7 +55,7 @@ defmodule Bumblebee.Conversion.PyTorch do
         end)
         |> Enum.reduce(&Map.merge/2)
 
-      params_expr = Axon.trace_init(model, input_template)
+      params_expr = Axon.trace_init(model, input_template, %{}, debug: true)
 
       {params, diff} = init_params(model, params_expr, pytorch_state, opts[:params_mapping])
 
@@ -449,6 +449,7 @@ defmodule Bumblebee.Conversion.PyTorch do
         # Running averages in normalization layers
         "mean" -> ["running_mean"]
         "var" -> ["running_var"]
+        "qkernel" -> ["qweight"]
         name -> [name]
       end
 

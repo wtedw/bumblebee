@@ -57,7 +57,8 @@ defmodule Bumblebee.Layers.Transformer do
       :layer_norm,
       :block_type,
       :scale_attention_weights,
-      :rotary_embedding
+      :rotary_embedding,
+      :quantization_config
     ]
 
     opts =
@@ -320,7 +321,8 @@ defmodule Bumblebee.Layers.Transformer do
         block_type: :standard,
         layer_norm: [],
         scale_attention_weights: true,
-        rotary_embedding: nil
+        rotary_embedding: nil,
+        quantization_config: nil
       ])
 
     name = opts[:name]
@@ -349,6 +351,7 @@ defmodule Bumblebee.Layers.Transformer do
     block_type = opts[:block_type]
     scale_attention_weights = opts[:scale_attention_weights]
     rotary_embedding = opts[:rotary_embedding]
+    quantization_config = opts[:quantization_config]
 
     ffn_fun =
       case ffn do
@@ -372,7 +375,9 @@ defmodule Bumblebee.Layers.Transformer do
         opts when is_list(opts) ->
           opts = Keyword.validate!(opts, epsilon: 1.0e-5)
 
-          &Axon.layer_norm(&1, epsilon: opts[:epsilon], name: &2)
+          # todo: this may not be necessary, seems to have no effect
+          # i thnk this case never hits, and layer norm fun is always passed
+          &Axon.layer_norm(&1, epsilon: opts[:epsilon], name: &2, type: {:bf, 16})
 
         fun when is_function(fun) ->
           fun
@@ -406,6 +411,7 @@ defmodule Bumblebee.Layers.Transformer do
           output_use_bias: output_use_bias,
           scale_attention_weights: scale_attention_weights,
           rotary_embedding: rotary_embedding,
+          quantization_config: quantization_config,
           name: join(name, "self_attention")
         )
 
@@ -450,6 +456,7 @@ defmodule Bumblebee.Layers.Transformer do
           output_use_bias: output_use_bias,
           scale_attention_weights: scale_attention_weights,
           rotary_embedding: rotary_embedding,
+          quantization_config: quantization_config,
           name: join(name, "cross_attention")
         )
 
@@ -736,7 +743,8 @@ defmodule Bumblebee.Layers.Transformer do
         key_use_bias: true,
         value_use_bias: true,
         output_use_bias: true,
-        rotary_embedding: nil
+        rotary_embedding: nil,
+        quantization_config: nil
       ])
 
     attention_mask = opts[:attention_mask]
@@ -765,32 +773,80 @@ defmodule Bumblebee.Layers.Transformer do
     inner_size = num_heads * attention_head_size
     inner_kv_size = num_key_value_heads * attention_head_size
 
+    quantization_config = opts[:quantization_config]
+
+    # todo, hardcode
+    gptq_config = %{
+      num_key_value_heads: 8,
+      num_heads: num_heads,
+      attention_head_size: attention_head_size,
+      hidden_size: hidden_size,
+      inner_size: inner_size,
+      inner_kv_size: inner_kv_size
+    }
+
     query =
-      query
-      |> Axon.dense(inner_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "query"),
-        use_bias: query_use_bias
-      )
-      |> Layers.split_heads(num_heads)
+      if quantization_config == nil do
+        query
+        |> Axon.dense(inner_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "query"),
+          use_bias: query_use_bias
+        )
+        |> Layers.split_heads(num_heads)
+      else
+        query
+        |> Layers.dense_quantized(
+          inner_size,
+          gptq_config,
+          quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "query"),
+          use_bias: query_use_bias
+        )
+        |> Layers.split_heads(num_heads)
+      end
 
     key =
-      key
-      |> Axon.dense(inner_kv_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "key"),
-        use_bias: key_use_bias
-      )
-      |> Layers.split_heads(num_key_value_heads)
+      if quantization_config == nil do
+        key
+        |> Axon.dense(inner_kv_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "key"),
+          use_bias: key_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      else
+        key
+        |> Layers.dense_quantized(
+          inner_kv_size,
+          gptq_config,
+          quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "key"),
+          use_bias: key_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      end
 
     value =
-      value
-      |> Axon.dense(inner_kv_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "value"),
-        use_bias: value_use_bias
-      )
-      |> Layers.split_heads(num_key_value_heads)
+      if quantization_config == nil do
+        value
+        |> Axon.dense(inner_kv_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "value"),
+          use_bias: value_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      else
+        value
+        |> Layers.dense_quantized(inner_kv_size, gptq_config, quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "value"),
+          use_bias: value_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      end
 
     {query, key} =
       case rotary_embedding do
@@ -880,13 +936,23 @@ defmodule Bumblebee.Layers.Transformer do
       )
 
     attention_output =
-      attention_output
-      |> Layers.flatten_trailing()
-      |> Axon.dense(hidden_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "output"),
-        use_bias: output_use_bias
-      )
+      if quantization_config == nil do
+        attention_output
+        |> Layers.flatten_trailing()
+        |> Axon.dense(hidden_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "output"),
+          use_bias: output_use_bias
+        )
+      else
+        attention_output
+        |> Layers.flatten_trailing()
+        |> Layers.dense_quantized(hidden_size, gptq_config, quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "output"),
+          use_bias: output_use_bias
+        )
+      end
 
     {attention_output, attention_weights, attention_cache, attention_relative_bias}
   end

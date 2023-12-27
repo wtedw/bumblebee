@@ -358,25 +358,196 @@ defmodule Bumblebee.Layers do
 
   """
   def dense_transposed(%Axon{} = x, units, opts \\ []) do
-    opts = Keyword.validate!(opts, [:name, kernel_initializer: :glorot_uniform])
+    opts = Keyword.validate!(opts, [:name, type: {:f, 32}, kernel_initializer: :glorot_uniform])
 
     kernel_shape = fn input_shape ->
+      IO.inspect(input_shape, label: "@@1 input_shape")
       kernel_shape = Axon.Shape.dense_kernel(input_shape, units)
 
       # We expect a transposed kernel
       kernel_shape
+      |> IO.inspect(label: "@@2")
       |> Tuple.to_list()
       |> Enum.reverse()
       |> List.to_tuple()
+      |> IO.inspect(label: "@@5")
     end
 
-    kernel = Axon.param("kernel", kernel_shape, initializer: opts[:kernel_initializer])
+    kernel =
+      Axon.param("kernel", kernel_shape,
+        initializer: opts[:kernel_initializer],
+        type: opts[:type]
+      )
 
     op = fn x, kernel, _opts ->
       Nx.dot(x, [-1], kernel, [1])
     end
 
     Axon.layer(op, [x, kernel], name: opts[:name], op_name: :dense_transposed)
+  end
+
+  def dense_quantized(%Axon{} = x, units, gptq_config, quantization_config, opts \\ [])
+      when is_integer(units) and units > 0 do
+    opts =
+      Keyword.validate!(opts, [
+        :name,
+        :activation,
+        :quantization_type,
+        :quantization_bits,
+        kernel_initializer: :glorot_uniform,
+        bias_initializer: :zeros,
+        use_bias: true
+      ])
+
+    # 32 is used in a lot of places
+
+    qweights_shape = fn input_shape ->
+      input_dim = elem(input_shape, tuple_size(input_shape) - 1)
+      qweight1 = div(input_dim, gptq_config.num_key_value_heads)
+      qweight2 = units
+
+      {qweight1, qweight2}
+      |> IO.inspect(label: "qweights shape")
+    end
+
+    blorp = div(32, quantization_config.bits)
+
+    bias_shape = &Axon.Shape.dense_bias(&1, units)
+
+    zeros_shape = fn input_shape ->
+      input_dim = elem(input_shape, tuple_size(input_shape) - 1)
+      group_size = quantization_config.group_size
+
+      {div(input_dim, group_size), div(units, gptq_config.num_key_value_heads)}
+      |> IO.inspect(label: "zeros shape")
+    end
+
+    scales_shape = fn input_shape ->
+      input_dim = elem(input_shape, tuple_size(input_shape) - 1)
+      group_size = quantization_config.group_size
+
+      {div(input_dim, group_size), units}
+      |> IO.inspect(label: "scales shape")
+    end
+
+    kernel =
+      Axon.param("qkernel", qweights_shape, initializer: :zeros, type: {:s, 32})
+
+    bias =
+      Axon.param("bias", bias_shape, initializer: opts[:bias_initializer], type: {:f, 16})
+
+    zeros =
+      Axon.param("qzeros", zeros_shape, initializer: :zeros, type: {:s, 32})
+
+    scales =
+      Axon.param("scales", scales_shape, initializer: :normal, type: {:f, 16})
+
+    {inputs, op} =
+      {[x, kernel, bias, scales, zeros], &dense_quantized_bias_impl(&1, &2, &3, &4, &5, &6)}
+
+    node =
+      Axon.layer(op, inputs,
+        name: opts[:name],
+        op_name: :dense_quantized,
+        group_size: quantization_config.group_size,
+        bits: quantization_config.bits,
+        blorp: blorp
+      )
+
+    node
+  end
+
+  defn dense_quantized_impl(x, qweight, scales, qzeros, opts \\ []) do
+    wx = do_dense_quantized(x, qweight, nil, scales, qzeros, opts)
+  end
+
+  defn dense_quantized_bias_impl(x, qweight, bias, scales, qzeros, opts \\ []) do
+    wx = do_dense_quantized(x, qweight, bias, scales, qzeros, opts)
+    Nx.add(wx, bias)
+  end
+
+  defn do_dense_quantized(x, qweight, bias, scales, qzeros, opts \\ []) do
+    opts = keyword!(opts, [:group_size, :bits, :blorp, mode: :train])
+
+    # print_expr(x, label: "x")
+    # print_expr(qweight, label: "qweight")
+    # print_expr(bias, label: "bias")
+    # print_expr(scales, label: "scales")
+    # print_expr(qzeros, label: "qzeros")
+
+    group_size = opts[:group_size]
+    bits = opts[:bits]
+    blorp = opts[:blorp]
+
+    # Helper tensor cause we're not in defn
+    one = Nx.tensor(1)
+    # todo
+    # wf looks like #Nx.Tensor<s32[1][8]> = [[0, 4, 8, 12, 16, 20, 24, 28]]
+    # 1. wf seems to be a constant tensor
+    # 2. this might be faster -> Nx.linspace(0, 32, n: 8, endpoint: false, type: :s32)
+    wf = Nx.linspace(0, 32, n: 8, endpoint: false, type: :s32)
+    # wf = 0..31//bits |> Enum.to_list() |> Nx.tensor(type: {:s, 32}) |> Nx.new_axis(0)
+    wf_new_axis_start = Nx.new_axis(wf, 0)
+    wf_new_axis_end = Nx.new_axis(wf, -1)
+
+    # Zeros
+
+    {qzeros_shape_0, qzeros_shape_1} = Nx.shape(qzeros)
+
+    zeros =
+      Nx.right_shift(
+        # we have to create a new axis first in order to broadcast/duplicate the values in that axis
+        Nx.new_axis(qzeros, 2)
+        # |> Nx.broadcast({qzeros_shape_0, qzeros_shape_1, div(32, bits)}),
+        |> Nx.broadcast({qzeros_shape_0, qzeros_shape_1, blorp}),
+        wf_new_axis_start
+      )
+
+    zeros =
+      if bits == 8,
+        do: Nx.as_type(zeros, {:s, 16}),
+        else: Nx.as_type(zeros, {:s, 8})
+
+    zeros = Nx.bitwise_and(zeros, Nx.pow(2, bits) |> Nx.subtract(one))
+    zeros = Nx.add(zeros, one)
+    zeros_shape = Nx.shape(zeros)
+    zeros = Nx.reshape(zeros, {:auto, 1, elem(zeros_shape, 1) * elem(zeros_shape, 2)})
+
+    # Scale
+
+    {_scale_shape_0, scale_shape_1} = Nx.shape(scales)
+    scales = Nx.reshape(scales, {:auto, 1, scale_shape_1})
+
+    # Weight
+
+    {qweight_shape_0, qweight_shape_1} = Nx.shape(qweight)
+
+    weight =
+      Nx.right_shift(
+        Nx.new_axis(qweight, 1)
+        |> Nx.broadcast({qweight_shape_0, div(32, bits), qweight_shape_1}),
+        wf_new_axis_end
+      )
+
+    weight =
+      if bits == 8,
+        do: Nx.as_type(weight, {:s, 16}),
+        else: Nx.as_type(weight, {:s, 8})
+
+    weight = Nx.bitwise_and(weight, Nx.pow(2, bits) |> Nx.subtract(one))
+    weight_shape = Nx.shape(weight)
+    weight = Nx.reshape(weight, {:auto, group_size, elem(weight_shape, 2)})
+
+    # All CUDA + non-CUDA paths lead to this code
+    weight = Nx.multiply(scales, Nx.subtract(weight, zeros))
+    {weight_shape_0, weight_shape_1, weight_shape_2} = Nx.shape(weight)
+    weight = Nx.reshape(weight, {weight_shape_0 * weight_shape_1, weight_shape_2})
+
+    out = Nx.dot(x, weight)
+    # todo, maybe cast if `out` is not f16, doesn't seem to be an issue
+    # out2 = Nx.as_type(out, x_type)
+
+    # if bias == nil, do: Nx.add(out, bias), else: out
   end
 
   @doc """
@@ -1042,11 +1213,18 @@ defmodule Bumblebee.Layers do
   # TODO: Add to Axon
   def rms_norm(input, opts \\ []) do
     opts =
-      Keyword.validate!(opts, [:name, channel_index: -1, epsilon: 1.0e-6, initializer: :ones])
+      Keyword.validate!(opts, [
+        :name,
+        type: {:f, 32},
+        channel_index: -1,
+        epsilon: 1.0e-6,
+        initializer: :ones
+      ])
 
     weight =
       Axon.param("weight", &Axon.Shape.norm_param(&1, opts[:channel_index]),
-        initializer: opts[:initializer]
+        initializer: opts[:initializer],
+        type: opts[:type]
       )
 
     Axon.layer(&rms_norm_impl/3, [input, weight],

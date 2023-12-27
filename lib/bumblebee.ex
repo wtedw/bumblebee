@@ -338,14 +338,17 @@ defmodule Bumblebee do
 
     case opts[:type] do
       nil ->
+        IO.puts("pol1")
         model
 
       %Axon.MixedPrecision.Policy{} = policy ->
+        IO.puts("pol2")
         Axon.MixedPrecision.apply_policy(model, policy)
 
       type ->
         type = Nx.Type.normalize!(type)
         policy = Axon.MixedPrecision.create_policy(params: type, compute: type, output: type)
+        IO.puts("pol3")
         Axon.MixedPrecision.apply_policy(model, policy)
     end
   end
@@ -441,6 +444,18 @@ defmodule Bumblebee do
       _ -> {:error, "failed to parse the config file, it is not a valid JSON"}
     end
   end
+
+  # defp infer_model_type(%{"architectures" => [class_name], "quantization_config" => quant_config}) do
+  #   IO.inspect(quant_config, label: "quant config")
+  #   case @transformers_class_to_model[class_name] do
+  #     nil ->
+  #       {:error,
+  #        "could not match the class name #{inspect(class_name)} to any of the supported models"}
+
+  #     {module, architecture} ->
+  #       {:ok, module, architecture}
+  #   end
+  # end
 
   defp infer_model_type(%{"architectures" => [class_name]}) do
     case @transformers_class_to_model[class_name] do
@@ -549,10 +564,41 @@ defmodule Bumblebee do
       ])
 
     with {:ok, repo_files} <- get_repo_files(repository),
+         IO.inspect(repo_files, label: "repo files"),
          {:ok, spec} <- maybe_load_model_spec(opts, repository, repo_files),
+         IO.inspect(spec),
+         #  model <- build_model(spec, Keyword.take(opts, [:type])),
+         #  IO.inspect(model) do
          model <- build_model(spec, Keyword.take(opts, [:type])),
          {:ok, params} <- load_params(spec, model, repository, repo_files, opts) do
       {:ok, %{model: model, params: params, spec: spec}}
+      # :ok
+    end
+  end
+
+  def load_model2(repository, opts \\ []) do
+    repository = normalize_repository!(repository)
+
+    opts =
+      Keyword.validate!(opts, [
+        :spec,
+        :module,
+        :architecture,
+        :params_variant,
+        :params_filename,
+        :log_params_diff,
+        :backend,
+        :type
+      ])
+
+    with {:ok, repo_files} <- get_repo_files(repository),
+         {:ok, spec} <- maybe_load_model_spec(opts, repository, repo_files),
+         IO.inspect(spec, label: "specs?"),
+         IO.inspect(opts, label: "opts?"),
+         #  model <- build_model(spec, Keyword.take(opts, [:type])),
+         #  IO.inspect(model) do
+         model <- build_model(spec, Keyword.take(opts, [:type])) do
+      model
     end
   end
 
@@ -574,6 +620,21 @@ defmodule Bumblebee do
 
     loader_fun = filename |> Path.extname() |> params_file_loader_fun()
 
+    ### Local dev
+    # # paths = ["/Users/ted/AI/mistral/Mistral-7B-Instruct-v0.2-GPTQ.safetensors"]
+    # paths = ["/Users/ted/AI/params/gptchat.safetensors"]
+
+    # opts =
+    #   [
+    #     params_mapping: params_mapping,
+    #     loader_fun: loader_fun
+    #   ] ++ Keyword.take(opts, [:backend, :log_params_diff])
+
+    # params = Bumblebee.Conversion.PyTorch.load_params!(model, input_template, paths, opts)
+    # {:ok, params}
+
+
+    ### Remote dev
     with {:ok, paths} <- download_params_files(repository, repo_files, filename, sharded?) do
       opts =
         [
