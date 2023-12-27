@@ -388,7 +388,6 @@ defmodule Bumblebee do
   end
 
   defp do_load_spec(repository, repo_files, module, architecture) do
-    # IO.inspect(repo, label: "repo")
     case repo_files do
       %{@config_filename => etag} ->
         with {:ok, path} <- download(repository, @config_filename, etag),
@@ -419,8 +418,6 @@ defmodule Bumblebee do
                   "expected architecture to be one of: #{Enum.map_join(architectures, ", ", &inspect/1)}, but got: #{inspect(architecture)}"
           end
 
-          IO.inspect(architectures, label: "architectures")
-
           spec =
             if architecture do
               configure(module, architecture: architecture)
@@ -428,11 +425,7 @@ defmodule Bumblebee do
               configure(module)
             end
 
-          IO.inspect(spec, label: "spec")
-
           spec = HuggingFace.Transformers.Config.load(spec, spec_data)
-
-          IO.inspect(spec, label: "spec2")
 
           {:ok, spec}
         end

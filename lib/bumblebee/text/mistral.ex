@@ -184,6 +184,26 @@ defmodule Bumblebee.Text.Mistral do
     |> Layers.output()
   end
 
+  def model(
+        %__MODULE__{
+          architecture: :for_causal_language_modeling,
+          quantization_config: %{quant_method: "gptq"}
+        } = spec
+      ) do
+    inputs = inputs(spec)
+
+    IO.puts("here222")
+    outputs = core(inputs, spec)
+    logits = language_modeling_head(outputs.hidden_state, spec, name: "language_modeling_head")
+
+    Layers.output(%{
+      logits: logits,
+      hidden_states: outputs.hidden_states,
+      attentions: outputs.attentions,
+      cache: outputs.cache
+    })
+  end
+
   def model(%__MODULE__{architecture: :for_causal_language_modeling} = spec) do
     inputs = inputs(spec)
 
@@ -405,8 +425,10 @@ defmodule Bumblebee.Text.Mistral do
           sym: {"sym", boolean()},
           true_sequential: {"true_sequential", boolean()},
           model_name_or_path: {"model_name_or_path", optional(string())},
-          model_file_base_name: {"model_file_bbase_name", string()}
+          model_file_base_name: {"model_file_base_name", string()},
+          quant_method: {"quant_method", string()}
         )
+        |> Enum.into(%{})
 
       IO.inspect(quant_opts, label: "quantopts")
 
