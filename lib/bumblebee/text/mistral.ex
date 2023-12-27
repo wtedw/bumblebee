@@ -59,6 +59,10 @@ defmodule Bumblebee.Text.Mistral do
       rotary_embedding_base: [
         default: 10_000,
         doc: "base for computing rotary embedding frequency"
+      ],
+      quantization_config: [
+        default: nil,
+        doc: "quant stuff"
       ]
     ] ++
       Shared.common_options([
@@ -379,6 +383,33 @@ defmodule Bumblebee.Text.Mistral do
     def load(spec, data) do
       import Shared.Converters
 
+      # quant_value_converters = %{
+      #       "bits" => number(),
+      #       "group_size" => number(),
+      #       "damp_percent" => number(),
+      # "desc_act" => boolean(),
+      # "sym" => boolean(),
+      # "true_sequential" => boolean(),
+      # "model_name_or_path" => optional(),
+      # "model_file_base_name" => string()
+      # }
+
+      IO.inspect(data, label: "data")
+
+      quant_opts =
+        convert!(data["quantization_config"],
+          bits: {"bits", number()},
+          group_size: {"group_size", number()},
+          damp_percent: {"damp_percent", number()},
+          desc_act: {"desc_act", boolean()},
+          sym: {"sym", boolean()},
+          true_sequential: {"true_sequential", boolean()},
+          model_name_or_path: {"model_name_or_path", optional(string())},
+          model_file_base_name: {"model_file_bbase_name", string()}
+        )
+
+      IO.inspect(quant_opts, label: "quantopts")
+
       opts =
         convert!(data,
           vocab_size: {"vocab_size", number()},
@@ -392,7 +423,9 @@ defmodule Bumblebee.Text.Mistral do
           rotary_embedding_base: {"rope_theta", number()},
           initializer_scale: {"initializer_range", number()},
           layer_norm_epsilon: {"rms_norm_eps", number()}
-        ) ++ Shared.common_options_from_transformers(data, spec)
+        ) ++
+          Shared.common_options_from_transformers(data, spec) ++
+          [quantization_config: quant_opts]
 
       @for.config(spec, opts)
     end

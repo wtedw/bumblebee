@@ -388,6 +388,7 @@ defmodule Bumblebee do
   end
 
   defp do_load_spec(repository, repo_files, module, architecture) do
+    # IO.inspect(repo, label: "repo")
     case repo_files do
       %{@config_filename => etag} ->
         with {:ok, path} <- download(repository, @config_filename, etag),
@@ -397,6 +398,11 @@ defmodule Bumblebee do
               {:ok, module, architecture} -> {module, architecture, nil}
               {:error, error} -> {nil, nil, error}
             end
+
+          IO.inspect(binding(),
+            label: "binding() #{__MODULE__}:#{__ENV__.line} #{DateTime.utc_now()}",
+            limit: :infinity
+          )
 
           module = module || inferred_module
           architecture = architecture || inferred_architecture
@@ -413,6 +419,8 @@ defmodule Bumblebee do
                   "expected architecture to be one of: #{Enum.map_join(architectures, ", ", &inspect/1)}, but got: #{inspect(architecture)}"
           end
 
+          IO.inspect(architectures, label: "architectures")
+
           spec =
             if architecture do
               configure(module, architecture: architecture)
@@ -420,7 +428,11 @@ defmodule Bumblebee do
               configure(module)
             end
 
+          IO.inspect(spec, label: "spec")
+
           spec = HuggingFace.Transformers.Config.load(spec, spec_data)
+
+          IO.inspect(spec, label: "spec2")
 
           {:ok, spec}
         end
@@ -441,6 +453,18 @@ defmodule Bumblebee do
       _ -> {:error, "failed to parse the config file, it is not a valid JSON"}
     end
   end
+
+  # defp infer_model_type(%{"architectures" => [class_name], "quantization_config" => quant_config}) do
+  #   IO.inspect(quant_config, label: "quant config")
+  #   case @transformers_class_to_model[class_name] do
+  #     nil ->
+  #       {:error,
+  #        "could not match the class name #{inspect(class_name)} to any of the supported models"}
+
+  #     {module, architecture} ->
+  #       {:ok, module, architecture}
+  #   end
+  # end
 
   defp infer_model_type(%{"architectures" => [class_name]}) do
     case @transformers_class_to_model[class_name] do
@@ -549,10 +573,15 @@ defmodule Bumblebee do
       ])
 
     with {:ok, repo_files} <- get_repo_files(repository),
+         IO.inspect(repo_files, label: "repo files"),
          {:ok, spec} <- maybe_load_model_spec(opts, repository, repo_files),
+         IO.inspect(spec),
          model <- build_model(spec, Keyword.take(opts, [:type])),
-         {:ok, params} <- load_params(spec, model, repository, repo_files, opts) do
-      {:ok, %{model: model, params: params, spec: spec}}
+         IO.inspect(model) do
+      #  model <- build_model(spec, Keyword.take(opts, [:type])),
+      #  {:ok, params} <- load_params(spec, model, repository, repo_files, opts) do
+      # {:ok, %{model: model, params: params, spec: spec}}
+      :ok
     end
   end
 
