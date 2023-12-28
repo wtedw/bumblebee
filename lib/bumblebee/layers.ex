@@ -379,6 +379,53 @@ defmodule Bumblebee.Layers do
     Axon.layer(op, [x, kernel], name: opts[:name], op_name: :dense_transposed)
   end
 
+  def dense_quantized(%Axon{} = x, units, quantization_config, opts \\ [])
+      when is_integer(units) and units > 0 do
+    opts =
+      Keyword.validate!(opts, [
+        :name,
+        :activation,
+        :quantization_type,
+        :quantization_bits,
+        kernel_initializer: :glorot_uniform,
+        bias_initializer: :zeros,
+        use_bias: true
+      ])
+
+    kernel_shape = &Axon.Shape.dense_kernel(&1, units)
+    bias_shape = &Axon.Shape.dense_bias(&1, units)
+
+    zeros_shape = fn input_shape ->
+      {elem(input_shape, tuple_size(input_shape) - 1), quantization_config.group_size}
+    end
+
+    scales_shape = fn input_shape ->
+      {elem(input_shape, tuple_size(input_shape) - 1), units}
+    end
+
+    kernel = Axon.param("qkernel", kernel_shape, initializer: opts[:kernel_initializer])
+    zeros = Axon.param("qzeros", zeros_shape, initializer: opts[:kernel_initializer])
+    scales = Axon.param("scales", scales_shape, initializer: opts[:kernel_initializer])
+
+    {inputs, op} =
+      if opts[:use_bias] do
+        bias = Axon.param("bias", bias_shape, initializer: opts[:bias_initializer])
+        {[x, kernel, bias, scales, zeros], :dense}
+      else
+        # should never happen
+        {[x, kernel, scales, zeros], :dense}
+      end
+
+    node = Axon.layer(op, inputs, name: opts[:name], op_name: :dense_quantized)
+
+    if activation = opts[:activation] do
+      IO.inspect(activation, label: "is there activation?")
+      activation(node, activation)
+    else
+      node
+    end
+  end
+
   @doc """
   Adds a 1-dimensional convolution layer to the network.
 

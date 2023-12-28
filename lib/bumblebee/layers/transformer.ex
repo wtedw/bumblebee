@@ -742,7 +742,7 @@ defmodule Bumblebee.Layers.Transformer do
         value_use_bias: true,
         output_use_bias: true,
         rotary_embedding: nil,
-        quantization_config: nil,
+        quantization_config: nil
       ])
 
     attention_mask = opts[:attention_mask]
@@ -772,34 +772,63 @@ defmodule Bumblebee.Layers.Transformer do
     inner_kv_size = num_key_value_heads * attention_head_size
 
     quantization_config = opts[:quantization_config]
-    |> IO.inspect(label: "mha qc")
 
     query =
-      query
-      |> Axon.dense(inner_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "query"),
-        use_bias: query_use_bias
-      )
-      |> Layers.split_heads(num_heads)
+      if quantization_config == nil do
+        query
+        |> Axon.dense(inner_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "query"),
+          use_bias: query_use_bias
+        )
+        |> Layers.split_heads(num_heads)
+      else
+        query
+        |> Layers.dense_quantized(inner_size, quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "query"),
+          use_bias: query_use_bias
+        )
+        |> Layers.split_heads(num_heads)
+      end
 
     key =
-      key
-      |> Axon.dense(inner_kv_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "key"),
-        use_bias: key_use_bias
-      )
-      |> Layers.split_heads(num_key_value_heads)
+      if quantization_config == nil do
+        key
+        |> Axon.dense(inner_kv_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "key"),
+          use_bias: key_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      else
+        key
+        |> Layers.dense_quantized(inner_kv_size, quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "key"),
+          use_bias: key_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      end
 
     value =
-      value
-      |> Axon.dense(inner_kv_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "value"),
-        use_bias: value_use_bias
-      )
-      |> Layers.split_heads(num_key_value_heads)
+      if quantization_config == nil do
+        value
+        |> Axon.dense(inner_kv_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "value"),
+          use_bias: value_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      else
+        value
+        |> Layers.dense_quantized(inner_kv_size, quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "value"),
+          use_bias: value_use_bias
+        )
+        |> Layers.split_heads(num_key_value_heads)
+      end
 
     {query, key} =
       case rotary_embedding do
@@ -889,13 +918,23 @@ defmodule Bumblebee.Layers.Transformer do
       )
 
     attention_output =
-      attention_output
-      |> Layers.flatten_trailing()
-      |> Axon.dense(hidden_size,
-        kernel_initializer: kernel_initializer,
-        name: join(name, "output"),
-        use_bias: output_use_bias
-      )
+      if quantization_config == nil do
+        attention_output
+        |> Layers.flatten_trailing()
+        |> Axon.dense(hidden_size,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "output"),
+          use_bias: output_use_bias
+        )
+      else
+        attention_output
+        |> Layers.flatten_trailing()
+        |> Layers.dense_quantized(hidden_size, quantization_config,
+          kernel_initializer: kernel_initializer,
+          name: join(name, "output"),
+          use_bias: output_use_bias
+        )
+      end
 
     {attention_output, attention_weights, attention_cache, attention_relative_bias}
   end
