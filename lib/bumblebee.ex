@@ -596,16 +596,25 @@ defmodule Bumblebee do
 
     loader_fun = filename |> Path.extname() |> params_file_loader_fun()
 
-    with {:ok, paths} <- download_params_files(repository, repo_files, filename, sharded?) do
-      opts =
-        [
-          params_mapping: params_mapping,
-          loader_fun: loader_fun
-        ] ++ Keyword.take(opts, [:backend, :log_params_diff])
+    paths = ["/Users/ted/AI/mistral/Mistral-7B-Instruct-v0.2-GPTQ.safetensors"]
+    opts =
+      [
+        params_mapping: params_mapping,
+        loader_fun: loader_fun
+      ] ++ Keyword.take(opts, [:backend, :log_params_diff])
 
-      params = Bumblebee.Conversion.PyTorch.load_params!(model, input_template, paths, opts)
-      {:ok, params}
-    end
+    params = Bumblebee.Conversion.PyTorch.load_params!(model, input_template, paths, opts)
+    {:ok, params}
+    # with {:ok, paths} <- download_params_files(repository, repo_files, filename, sharded?) do
+    #   opts =
+    #     [
+    #       params_mapping: params_mapping,
+    #       loader_fun: loader_fun
+    #     ] ++ Keyword.take(opts, [:backend, :log_params_diff])
+
+    #   # params = Bumblebee.Conversion.PyTorch.load_params!(model, input_template, paths, opts)
+    #   {:ok, params}
+    # end
   end
 
   defp infer_params_filename(repo_files, nil = _filename, variant) do
