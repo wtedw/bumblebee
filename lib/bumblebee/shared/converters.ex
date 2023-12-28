@@ -108,26 +108,27 @@ defmodule Bumblebee.Shared.Converters do
     end
   end
 
-  def map(key_converter, value_converters) do
-    fn name, value ->
-      if is_map(value) do
-        value
-        |> safe_map(fn {key, value} ->
-          value_converter = value_converters[key]
+  # possibly use this
+  # def map(key_converter, value_converters) when is_list(value_converters) do
+  #   fn name, value ->
+  #     if is_map(value) do
+  #       value
+  #       |> safe_map(fn {key, value} ->
+  #         value_converter = value_converters[key]
 
-          with {:ok, key} <- key_converter.("#{name} key", key),
-               {:ok, value} <- value_converter.("#{name}.#{value}]", value),
-               do: {:ok, {key, value}}
-        end)
-        |> case do
-          {:ok, list} -> {:ok, Map.new(list)}
-          error -> error
-        end
-      else
-        {:error, "expected #{inspect(name)} to be a map, got: #{inspect(value)}"}
-      end
-    end
-  end
+  #         with {:ok, key} <- key_converter.("#{name} key", key),
+  #              {:ok, value} <- value_converter.("#{name}.#{value}]", value),
+  #              do: {:ok, {key, value}}
+  #       end)
+  #       |> case do
+  #         {:ok, list} -> {:ok, Map.new(list)}
+  #         error -> error
+  #       end
+  #     else
+  #       {:error, "expected #{inspect(name)} to be a map, got: #{inspect(value)}"}
+  #     end
+  #   end
+  # end
 
   def tuple(converters) do
     fn name, value ->

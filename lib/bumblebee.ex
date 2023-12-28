@@ -569,11 +569,11 @@ defmodule Bumblebee do
          IO.inspect(repo_files, label: "repo files"),
          {:ok, spec} <- maybe_load_model_spec(opts, repository, repo_files),
          IO.inspect(spec),
-         model <- build_model(spec, Keyword.take(opts, [:type])),
-         IO.inspect(model) do
-      #  model <- build_model(spec, Keyword.take(opts, [:type])),
-      #  {:ok, params} <- load_params(spec, model, repository, repo_files, opts) do
-      # {:ok, %{model: model, params: params, spec: spec}}
+        #  model <- build_model(spec, Keyword.take(opts, [:type])),
+        #  IO.inspect(model) do
+       model <- build_model(spec, Keyword.take(opts, [:type])),
+       {:ok, params} <- load_params(spec, model, repository, repo_files, opts) do
+      {:ok, %{model: model, params: params, spec: spec}}
       :ok
     end
   end
