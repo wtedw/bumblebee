@@ -338,14 +338,17 @@ defmodule Bumblebee do
 
     case opts[:type] do
       nil ->
+        IO.puts("pol1")
         model
 
       %Axon.MixedPrecision.Policy{} = policy ->
+        IO.puts("pol2")
         Axon.MixedPrecision.apply_policy(model, policy)
 
       type ->
         type = Nx.Type.normalize!(type)
         policy = Axon.MixedPrecision.create_policy(params: type, compute: type, output: type)
+        IO.puts("pol3")
         Axon.MixedPrecision.apply_policy(model, policy)
     end
   end
@@ -397,11 +400,6 @@ defmodule Bumblebee do
               {:ok, module, architecture} -> {module, architecture, nil}
               {:error, error} -> {nil, nil, error}
             end
-
-          IO.inspect(binding(),
-            label: "binding() #{__MODULE__}:#{__ENV__.line} #{DateTime.utc_now()}",
-            limit: :infinity
-          )
 
           module = module || inferred_module
           architecture = architecture || inferred_architecture
@@ -594,9 +592,9 @@ defmodule Bumblebee do
       ])
 
     with {:ok, repo_files} <- get_repo_files(repository),
-         IO.inspect(repo_files, label: "repo files"),
          {:ok, spec} <- maybe_load_model_spec(opts, repository, repo_files),
-         IO.inspect(spec),
+         IO.inspect(spec, label: "specs?"),
+         IO.inspect(opts, label: "opts?"),
          #  model <- build_model(spec, Keyword.take(opts, [:type])),
          #  IO.inspect(model) do
          model <- build_model(spec, Keyword.take(opts, [:type])) do

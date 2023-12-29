@@ -405,14 +405,24 @@ defmodule Bumblebee.Layers do
       |> IO.inspect(label: "scales shape")
     end
 
+    if is_function(opts[:kernel_initializer]) do
+      opts[:kernel_initializer]
+      |> Function.info()
+      |> IO.inspect(label: "kernel initializer")
+    else
+      opts[:kernel_initializer]
+      |> IO.inspect(label: "kernel initializer")
+    end
+
+
     kernel =
-      Axon.param("qkernel", kernel_shape, initializer: opts[:kernel_initializer], type: {:s, 32})
+      Axon.param("qkernel", kernel_shape, initializer: :zeros, type: {:s, 32})
 
     zeros =
-      Axon.param("qzeros", zeros_shape, initializer: opts[:kernel_initializer], type: {:s, 32})
+      Axon.param("qzeros", zeros_shape, initializer: :zeros, type: {:s, 32})
 
     scales =
-      Axon.param("scales", scales_shape, initializer: opts[:kernel_initializer], type: {:f, 16})
+      Axon.param("scales", scales_shape, initializer: :normal, type: {:f, 16})
 
     blorp = div(32, quantization_config.bits)
 
