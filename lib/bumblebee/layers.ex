@@ -379,7 +379,7 @@ defmodule Bumblebee.Layers do
     Axon.layer(op, [x, kernel], name: opts[:name], op_name: :dense_transposed)
   end
 
-  def dense_quantized(%Axon{} = x, units, quantization_config, opts \\ [])
+  def dense_quantized(%Axon{} = x, units, gptq_config, quantization_config, opts \\ [])
       when is_integer(units) and units > 0 do
     opts =
       Keyword.validate!(opts, [
@@ -392,39 +392,47 @@ defmodule Bumblebee.Layers do
         use_bias: true
       ])
 
-    kernel_shape = &Axon.Shape.dense_kernel(&1, units)
+    # 32 is used in a lot of places
+    IO.inspect(gptq_config, label: "gptq config")
+    IO.inspect(units, label: "gptq units")
+
+    qweights_shape = fn input_shape ->
+      input_dim = elem(input_shape, tuple_size(input_shape) - 1)
+      qweight1 = div(input_dim, gptq_config.num_key_value_heads)
+      qweight2 = units
+
+      {qweight1, qweight2}
+      |> IO.inspect(label: "qweights shape")
+    end
+
+    blorp = div(32, quantization_config.bits)
+
     bias_shape = &Axon.Shape.dense_bias(&1, units)
 
     zeros_shape = fn input_shape ->
-      {elem(input_shape, tuple_size(input_shape) - 1), quantization_config.group_size}
+      input_dim = elem(input_shape, tuple_size(input_shape) - 1)
+      group_size = quantization_config.group_size
+
+      {div(input_dim, group_size), div(units, gptq_config.num_key_value_heads)}
       |> IO.inspect(label: "zeros shape")
     end
 
     scales_shape = fn input_shape ->
-      {elem(input_shape, tuple_size(input_shape) - 1), units}
+      input_dim = elem(input_shape, tuple_size(input_shape) - 1)
+      group_size = quantization_config.group_size
+
+      {div(input_dim, group_size), units}
       |> IO.inspect(label: "scales shape")
     end
 
-    if is_function(opts[:kernel_initializer]) do
-      opts[:kernel_initializer]
-      |> Function.info()
-      |> IO.inspect(label: "kernel initializer")
-    else
-      opts[:kernel_initializer]
-      |> IO.inspect(label: "kernel initializer")
-    end
-
-
     kernel =
-      Axon.param("qkernel", kernel_shape, initializer: :zeros, type: {:s, 32})
+      Axon.param("qkernel", qweights_shape, initializer: :zeros, type: {:s, 32})
 
     zeros =
       Axon.param("qzeros", zeros_shape, initializer: :zeros, type: {:s, 32})
 
     scales =
       Axon.param("scales", scales_shape, initializer: :normal, type: {:f, 16})
-
-    blorp = div(32, quantization_config.bits)
 
     {inputs, op} =
       if opts[:use_bias] do
@@ -477,7 +485,6 @@ defmodule Bumblebee.Layers do
     print_expr(bias, label: "bias")
     print_expr(scales, label: "scales")
     print_expr(qzeros, label: "qzeros")
-
 
     group_size = opts[:group_size]
     bits = opts[:bits]

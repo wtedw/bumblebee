@@ -773,6 +773,15 @@ defmodule Bumblebee.Layers.Transformer do
 
     quantization_config = opts[:quantization_config]
 
+    gptq_config = %{
+      num_key_value_heads: num_key_value_heads,
+      num_heads: num_heads,
+      attention_head_size: attention_head_size,
+      hidden_size: hidden_size,
+      inner_size: inner_size,
+      inner_kv_size: inner_kv_size
+    }
+
     query =
       if quantization_config == nil do
         query
@@ -784,7 +793,10 @@ defmodule Bumblebee.Layers.Transformer do
         |> Layers.split_heads(num_heads)
       else
         query
-        |> Layers.dense_quantized(inner_size, quantization_config,
+        |> Layers.dense_quantized(
+          inner_size,
+          gptq_config,
+          quantization_config,
           kernel_initializer: kernel_initializer,
           name: join(name, "query"),
           use_bias: query_use_bias
@@ -803,7 +815,10 @@ defmodule Bumblebee.Layers.Transformer do
         |> Layers.split_heads(num_key_value_heads)
       else
         key
-        |> Layers.dense_quantized(inner_kv_size, quantization_config,
+        |> Layers.dense_quantized(
+          inner_kv_size,
+          gptq_config,
+          quantization_config,
           kernel_initializer: kernel_initializer,
           name: join(name, "key"),
           use_bias: key_use_bias
@@ -822,7 +837,7 @@ defmodule Bumblebee.Layers.Transformer do
         |> Layers.split_heads(num_key_value_heads)
       else
         value
-        |> Layers.dense_quantized(inner_kv_size, quantization_config,
+        |> Layers.dense_quantized(inner_kv_size, gptq_config, quantization_config,
           kernel_initializer: kernel_initializer,
           name: join(name, "value"),
           use_bias: value_use_bias
@@ -929,7 +944,7 @@ defmodule Bumblebee.Layers.Transformer do
       else
         attention_output
         |> Layers.flatten_trailing()
-        |> Layers.dense_quantized(hidden_size, quantization_config,
+        |> Layers.dense_quantized(hidden_size, gptq_config, quantization_config,
           kernel_initializer: kernel_initializer,
           name: join(name, "output"),
           use_bias: output_use_bias

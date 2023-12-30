@@ -192,7 +192,6 @@ defmodule Bumblebee.Text.Mistral do
       ) do
     inputs = inputs(spec)
 
-    IO.puts("here222")
     IO.inspect(spec, label: "specaroo")
     outputs = core(inputs, spec)
     logits = language_modeling_head(outputs.hidden_state, spec, name: "language_modeling_head")
@@ -349,7 +348,12 @@ defmodule Bumblebee.Text.Mistral do
       kernel_initializer: kernel_initializer(spec),
       layer_norm: &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon),
       ffn:
-        &gated_ffn(&1, spec.intermediate_size, spec.hidden_size, quantization_config,
+        &gated_ffn(
+          &1,
+          spec.intermediate_size,
+          spec.hidden_size,
+          spec.num_key_value_heads,
+          quantization_config,
           name: &2,
           activation: spec.activation
         ),
@@ -371,7 +375,7 @@ defmodule Bumblebee.Text.Mistral do
     )
   end
 
-  defp gated_ffn(hidden_state, intermediate_size, output_size, nil, opts) do
+  defp gated_ffn(hidden_state, intermediate_size, output_size, num_key_value_heads, nil, opts) do
     name = opts[:name]
     activation = opts[:activation]
 
@@ -388,25 +392,32 @@ defmodule Bumblebee.Text.Mistral do
     Axon.dense(hidden_state, output_size, name: join(name, "output"), use_bias: false)
   end
 
-  defp gated_ffn(hidden_state, intermediate_size, output_size, quantization_config, opts) do
+  defp gated_ffn(hidden_state, intermediate_size, output_size, num_key_value_heads, quantization_config, opts) do
     name = opts[:name]
     activation = opts[:activation]
 
+    gptq_config = %{
+      origin: "gated_ffn",
+      num_key_value_heads: num_key_value_heads,
+      intermediate_size: intermediate_size,
+      output_size: output_size
+    }
+
     intermediate =
-      Layers.dense_quantized(hidden_state, intermediate_size, quantization_config,
+      Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
         name: join(name, "intermediate"),
         use_bias: false
       )
 
     gate =
-      Layers.dense_quantized(hidden_state, intermediate_size, quantization_config,
+      Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
         name: join(name, "gate"),
         use_bias: false
       )
 
     hidden_state = Axon.multiply(intermediate, Axon.activation(gate, activation))
 
-    Layers.dense_quantized(hidden_state, output_size, quantization_config,
+    Layers.dense_quantized(hidden_state, output_size, gptq_config, quantization_config,
       name: join(name, "output"),
       use_bias: false
     )
