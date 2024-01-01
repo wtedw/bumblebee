@@ -480,11 +480,11 @@ defmodule Bumblebee.Layers do
   defn do_dense_quantized(x, qweight, bias, scales, qzeros, opts \\ []) do
     opts = keyword!(opts, [:group_size, :bits, :blorp, mode: :train])
 
-    print_expr(x, label: "x")
-    print_expr(qweight, label: "qweight")
-    print_expr(bias, label: "bias")
-    print_expr(scales, label: "scales")
-    print_expr(qzeros, label: "qzeros")
+    # print_expr(x, label: "x")
+    # print_expr(qweight, label: "qweight")
+    # print_expr(bias, label: "bias")
+    # print_expr(scales, label: "scales")
+    # print_expr(qzeros, label: "qzeros")
 
     group_size = opts[:group_size]
     bits = opts[:bits]
@@ -503,17 +503,14 @@ defmodule Bumblebee.Layers do
 
     # Zeros
 
-    print_expr(qzeros, label: "qzeros pre")
     {qzeros_shape_0, qzeros_shape_1} = Nx.shape(qzeros)
 
     zeros =
       Nx.right_shift(
         # we have to create a new axis first in order to broadcast/duplicate the values in that axis
         Nx.new_axis(qzeros, 2)
-        |> print_expr(label: "qzeros new axis")
         # |> Nx.broadcast({qzeros_shape_0, qzeros_shape_1, div(32, bits)}),
-        |> Nx.broadcast({qzeros_shape_0, qzeros_shape_1, blorp})
-        |> print_expr(label: "qzeros after broadcast"),
+        |> Nx.broadcast({qzeros_shape_0, qzeros_shape_1, blorp}),
         wf_new_axis_start
       )
 
