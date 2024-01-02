@@ -572,7 +572,7 @@ defmodule Bumblebee do
          model <- build_model(spec, Keyword.take(opts, [:type])),
          {:ok, params} <- load_params(spec, model, repository, repo_files, opts) do
       {:ok, %{model: model, params: params, spec: spec}}
-      :ok
+      # :ok
     end
   end
 

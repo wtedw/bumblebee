@@ -428,6 +428,9 @@ defmodule Bumblebee.Layers do
     kernel =
       Axon.param("qkernel", qweights_shape, initializer: :zeros, type: {:s, 32})
 
+    bias =
+      Axon.param("bias", bias_shape, initializer: opts[:bias_initializer], type: {:f, 16})
+
     zeros =
       Axon.param("qzeros", zeros_shape, initializer: :zeros, type: {:s, 32})
 
@@ -435,22 +438,7 @@ defmodule Bumblebee.Layers do
       Axon.param("scales", scales_shape, initializer: :normal, type: {:f, 16})
 
     {inputs, op} =
-      if opts[:use_bias] do
-        bias =
-          Axon.param("bias", bias_shape, initializer: opts[:bias_initializer], type: {:f, 16})
-
-        # op = fn x, qweights, bias, scales, zeros, opts ->
-        #   dense_quantized_bias_impl(x, qweights, bias, scales, zeros, opts ++ [blorp: blorp])
-        # end
-
-        {[x, kernel, bias, scales, zeros], &dense_quantized_bias_impl(&1, &2, &3, &4, &5, &6)}
-      else
-        # op = fn x, qweights, scales, zeros, opts ->
-        #   dense_quantized_impl(x, qweights, scales, zeros, opts ++ [blorp: blorp])
-        # end
-
-        {[x, kernel, scales, zeros], &dense_quantized_impl(&1, &2, &3, &4, &5)}
-      end
+      {[x, kernel, bias, scales, zeros], &dense_quantized_bias_impl(&1, &2, &3, &4, &5, &6)}
 
     node =
       Axon.layer(op, inputs,

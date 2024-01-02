@@ -449,6 +449,7 @@ defmodule Bumblebee.Conversion.PyTorch do
         # Running averages in normalization layers
         "mean" -> ["running_mean"]
         "var" -> ["running_var"]
+        "qkernel" -> ["qweight"]
         name -> [name]
       end
 
