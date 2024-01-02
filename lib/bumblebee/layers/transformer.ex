@@ -375,7 +375,9 @@ defmodule Bumblebee.Layers.Transformer do
         opts when is_list(opts) ->
           opts = Keyword.validate!(opts, epsilon: 1.0e-5)
 
-          &Axon.layer_norm(&1, epsilon: opts[:epsilon], name: &2)
+          # todo: this may not be necessary, seems to have no effect
+          # i thnk this case never hits, and layer norm fun is always passed
+          &Axon.layer_norm(&1, epsilon: opts[:epsilon], name: &2, type: {:bf, 16})
 
         fun when is_function(fun) ->
           fun

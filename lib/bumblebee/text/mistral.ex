@@ -301,7 +301,8 @@ defmodule Bumblebee.Text.Mistral do
     hidden_state =
       Layers.rms_norm(decoder_outputs.hidden_state,
         name: "output_norm",
-        epsilon: spec.layer_norm_epsilon
+        epsilon: spec.layer_norm_epsilon,
+        type: {:bf, 16}
       )
 
     %{
@@ -320,7 +321,8 @@ defmodule Bumblebee.Text.Mistral do
     Layers.default input_embeddings do
       Axon.embedding(input_ids, spec.vocab_size, spec.hidden_size,
         kernel_initializer: kernel_initializer(spec),
-        name: join(name, "token_embedding")
+        name: join(name, "token_embedding"),
+        type: {:bf, 16}
       )
     end
   end
@@ -346,7 +348,7 @@ defmodule Bumblebee.Text.Mistral do
       num_key_value_heads: spec.num_key_value_heads,
       hidden_size: spec.hidden_size,
       kernel_initializer: kernel_initializer(spec),
-      layer_norm: &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon),
+      layer_norm: &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:bf, 16}),
       ffn:
         &gated_ffn(
           &1,
@@ -429,7 +431,8 @@ defmodule Bumblebee.Text.Mistral do
     # TODO: Tie lm-head to word embedding as a spec option
     Layers.dense_transposed(hidden_state, spec.vocab_size,
       kernel_initializer: kernel_initializer(spec),
-      name: join(name, "output")
+      name: join(name, "output"),
+      type: {:bf, 16}
     )
   end
 

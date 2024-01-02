@@ -358,7 +358,7 @@ defmodule Bumblebee.Layers do
 
   """
   def dense_transposed(%Axon{} = x, units, opts \\ []) do
-    opts = Keyword.validate!(opts, [:name, kernel_initializer: :glorot_uniform])
+    opts = Keyword.validate!(opts, [:name, type: {:f, 32}, kernel_initializer: :glorot_uniform])
 
     kernel_shape = fn input_shape ->
       kernel_shape = Axon.Shape.dense_kernel(input_shape, units)
@@ -370,7 +370,7 @@ defmodule Bumblebee.Layers do
       |> List.to_tuple()
     end
 
-    kernel = Axon.param("kernel", kernel_shape, initializer: opts[:kernel_initializer])
+    kernel = Axon.param("kernel", kernel_shape, initializer: opts[:kernel_initializer], type: opts[:type])
 
     op = fn x, kernel, _opts ->
       Nx.dot(x, [-1], kernel, [1])
@@ -1212,11 +1212,12 @@ defmodule Bumblebee.Layers do
   # TODO: Add to Axon
   def rms_norm(input, opts \\ []) do
     opts =
-      Keyword.validate!(opts, [:name, channel_index: -1, epsilon: 1.0e-6, initializer: :ones])
+      Keyword.validate!(opts, [:name, type: {:bf, 16}, channel_index: -1, epsilon: 1.0e-6, initializer: :ones])
 
     weight =
       Axon.param("weight", &Axon.Shape.norm_param(&1, opts[:channel_index]),
-        initializer: opts[:initializer]
+        initializer: opts[:initializer],
+        type: opts[:type]
       )
 
     Axon.layer(&rms_norm_impl/3, [input, weight],
