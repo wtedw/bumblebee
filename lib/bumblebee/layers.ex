@@ -361,16 +361,23 @@ defmodule Bumblebee.Layers do
     opts = Keyword.validate!(opts, [:name, type: {:f, 32}, kernel_initializer: :glorot_uniform])
 
     kernel_shape = fn input_shape ->
+      IO.inspect(input_shape, label: "@@1 input_shape")
       kernel_shape = Axon.Shape.dense_kernel(input_shape, units)
 
       # We expect a transposed kernel
       kernel_shape
+      |> IO.inspect(label: "@@2")
       |> Tuple.to_list()
       |> Enum.reverse()
       |> List.to_tuple()
+      |> IO.inspect(label: "@@5")
     end
 
-    kernel = Axon.param("kernel", kernel_shape, initializer: opts[:kernel_initializer], type: opts[:type])
+    kernel =
+      Axon.param("kernel", kernel_shape,
+        initializer: opts[:kernel_initializer],
+        type: opts[:type]
+      )
 
     op = fn x, kernel, _opts ->
       Nx.dot(x, [-1], kernel, [1])
@@ -393,8 +400,6 @@ defmodule Bumblebee.Layers do
       ])
 
     # 32 is used in a lot of places
-    IO.inspect(gptq_config, label: "gptq config")
-    IO.inspect(units, label: "gptq units")
 
     qweights_shape = fn input_shape ->
       input_dim = elem(input_shape, tuple_size(input_shape) - 1)
@@ -449,11 +454,7 @@ defmodule Bumblebee.Layers do
         blorp: blorp
       )
 
-    if activation = opts[:activation] do
-      activation(node, activation)
-    else
-      node
-    end
+    node
   end
 
   defn dense_quantized_impl(x, qweight, scales, qzeros, opts \\ []) do
@@ -1212,7 +1213,13 @@ defmodule Bumblebee.Layers do
   # TODO: Add to Axon
   def rms_norm(input, opts \\ []) do
     opts =
-      Keyword.validate!(opts, [:name, type: {:bf, 16}, channel_index: -1, epsilon: 1.0e-6, initializer: :ones])
+      Keyword.validate!(opts, [
+        :name,
+        type: {:f, 32},
+        channel_index: -1,
+        epsilon: 1.0e-6,
+        initializer: :ones
+      ])
 
     weight =
       Axon.param("weight", &Axon.Shape.norm_param(&1, opts[:channel_index]),

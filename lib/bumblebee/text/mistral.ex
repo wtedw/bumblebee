@@ -348,7 +348,8 @@ defmodule Bumblebee.Text.Mistral do
       num_key_value_heads: spec.num_key_value_heads,
       hidden_size: spec.hidden_size,
       kernel_initializer: kernel_initializer(spec),
-      layer_norm: &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:bf, 16}),
+      layer_norm:
+        &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:bf, 16}),
       ffn:
         &gated_ffn(
           &1,
@@ -394,7 +395,14 @@ defmodule Bumblebee.Text.Mistral do
     Axon.dense(hidden_state, output_size, name: join(name, "output"), use_bias: false)
   end
 
-  defp gated_ffn(hidden_state, intermediate_size, output_size, num_key_value_heads, quantization_config, opts) do
+  defp gated_ffn(
+         hidden_state,
+         intermediate_size,
+         output_size,
+         num_key_value_heads,
+         quantization_config,
+         opts
+       ) do
     name = opts[:name]
     activation = opts[:activation]
 
@@ -407,21 +415,18 @@ defmodule Bumblebee.Text.Mistral do
 
     intermediate =
       Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
-        name: join(name, "intermediate"),
-        use_bias: false
+        name: join(name, "intermediate")
       )
 
     gate =
       Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
-        name: join(name, "gate"),
-        use_bias: false
+        name: join(name, "gate")
       )
 
     hidden_state = Axon.multiply(intermediate, Axon.activation(gate, activation))
 
     Layers.dense_quantized(hidden_state, output_size, gptq_config, quantization_config,
-      name: join(name, "output"),
-      use_bias: false
+      name: join(name, "output")
     )
   end
 
@@ -429,9 +434,16 @@ defmodule Bumblebee.Text.Mistral do
     name = opts[:name]
 
     # TODO: Tie lm-head to word embedding as a spec option
+    # Axon.dense(hidden_state, spec.vocab_size,
+    #   kernel_initializer: kernel_initializer(spec),
+    #   name: join(name, "output"),
+    #   use_bias: false,
+    #   type: {:bf, 16}
+    # )
     Layers.dense_transposed(hidden_state, spec.vocab_size,
       kernel_initializer: kernel_initializer(spec),
       name: join(name, "output"),
+      # use_bias: false,
       type: {:bf, 16}
     )
   end

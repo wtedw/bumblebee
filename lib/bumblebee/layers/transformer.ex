@@ -775,8 +775,9 @@ defmodule Bumblebee.Layers.Transformer do
 
     quantization_config = opts[:quantization_config]
 
+    # todo, hardcode
     gptq_config = %{
-      num_key_value_heads: num_key_value_heads,
+      num_key_value_heads: 8,
       num_heads: num_heads,
       attention_head_size: attention_head_size,
       hidden_size: hidden_size,

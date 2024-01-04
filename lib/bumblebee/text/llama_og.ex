@@ -1,4 +1,4 @@
-defmodule Bumblebee.Text.Llama do
+defmodule Bumblebee.Text.LlamaOg do
   alias Bumblebee.Shared
 
   options =
@@ -66,10 +66,6 @@ defmodule Bumblebee.Text.Llama do
         default: 0.02,
         doc:
           "the standard deviation of the normal initializer used for initializing kernel parameters"
-      ],
-      quantization_config: [
-        default: nil,
-        doc: "quant stuff"
       ]
     ] ++
       Shared.common_options([
@@ -191,26 +187,6 @@ defmodule Bumblebee.Text.Llama do
     |> Layers.output()
   end
 
-  def model(
-        %__MODULE__{
-          architecture: :for_causal_language_modeling,
-          quantization_config: %{quant_method: "gptq"}
-        } = spec
-      ) do
-    inputs = inputs(spec)
-
-    IO.inspect(spec, label: "specaroo")
-    outputs = core(inputs, spec)
-    logits = language_modeling_head(outputs.hidden_state, spec, name: "language_modeling_head")
-
-    Layers.output(%{
-      logits: logits,
-      hidden_states: outputs.hidden_states,
-      attentions: outputs.attentions,
-      cache: outputs.cache
-    })
-  end
-
   def model(%__MODULE__{architecture: :for_causal_language_modeling} = spec) do
     inputs = inputs(spec)
 
@@ -308,8 +284,7 @@ defmodule Bumblebee.Text.Llama do
     hidden_state =
       Layers.rms_norm(decoder_outputs.hidden_state,
         name: "output_norm",
-        epsilon: spec.layer_norm_epsilon,
-        type: {:f, 16}
+        epsilon: spec.layer_norm_epsilon
       )
 
     %{
@@ -326,8 +301,7 @@ defmodule Bumblebee.Text.Llama do
     Layers.default input_embeddings do
       Axon.embedding(input_ids, spec.vocab_size, spec.hidden_size,
         kernel_initializer: kernel_initializer(spec),
-        name: join(name, "token_embedding"),
-        type: {:f, 16}
+        name: join(name, "token_embedding")
       )
     end
   end
@@ -342,8 +316,6 @@ defmodule Bumblebee.Text.Llama do
          opts
        ) do
     name = opts[:name]
-    quantization_config = spec.quantization_config
-
 
     Layers.Transformer.blocks(hidden_state,
       attention_mask: attention_mask,
@@ -354,14 +326,9 @@ defmodule Bumblebee.Text.Llama do
       num_key_value_heads: spec.num_key_value_heads,
       hidden_size: spec.hidden_size,
       kernel_initializer: kernel_initializer(spec),
-      layer_norm:
-        &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:f, 16}),
+      layer_norm: &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon),
       ffn:
-        &gated_ffn(
-          &1,
-          spec.intermediate_size,
-          spec.hidden_size,
-          quantization_config,
+        &gated_ffn(&1, spec.intermediate_size, spec.hidden_size,
           name: &2,
           activation: spec.activation
         ),
@@ -379,7 +346,6 @@ defmodule Bumblebee.Text.Llama do
       output_use_bias: false,
       output_hidden_states: spec.output_hidden_states,
       output_attentions: spec.output_attentions,
-      quantization_config: spec.quantization_config,
       name: join(name, "blocks")
     )
   end
@@ -401,48 +367,13 @@ defmodule Bumblebee.Text.Llama do
     Axon.dense(hidden_state, output_size, name: join(name, "output"), use_bias: false)
   end
 
-  defp gated_ffn(
-         hidden_state,
-         intermediate_size,
-         output_size,
-         quantization_config,
-         opts
-       ) do
-    name = opts[:name]
-    activation = opts[:activation]
-
-    gptq_config = %{
-      origin: "gated_ffn",
-      num_key_value_heads: 8,
-      intermediate_size: intermediate_size,
-      output_size: output_size
-    }
-
-    intermediate =
-      Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
-        name: join(name, "intermediate")
-      )
-
-    gate =
-      Layers.dense_quantized(hidden_state, intermediate_size, gptq_config, quantization_config,
-        name: join(name, "gate")
-      )
-
-    hidden_state = Axon.multiply(intermediate, Axon.activation(gate, activation))
-
-    Layers.dense_quantized(hidden_state, output_size, gptq_config, quantization_config,
-      name: join(name, "output")
-    )
-  end
-
   defp language_modeling_head(hidden_state, spec, opts) do
     name = opts[:name]
 
     # TODO: Tie lm-head to word embedding as a spec option
     Layers.dense_transposed(hidden_state, spec.vocab_size,
       kernel_initializer: kernel_initializer(spec),
-      name: join(name, "output"),
-      type: {:f, 16}
+      name: join(name, "output")
     )
   end
 
@@ -453,20 +384,6 @@ defmodule Bumblebee.Text.Llama do
   defimpl Bumblebee.HuggingFace.Transformers.Config do
     def load(spec, data) do
       import Shared.Converters
-
-      quant_opts =
-        convert!(data["quantization_config"],
-          bits: {"bits", number()},
-          group_size: {"group_size", number()},
-          damp_percent: {"damp_percent", number()},
-          desc_act: {"desc_act", boolean()},
-          sym: {"sym", boolean()},
-          true_sequential: {"true_sequential", boolean()},
-          model_name_or_path: {"model_name_or_path", optional(string())},
-          model_file_base_name: {"model_file_base_name", string()},
-          quant_method: {"quant_method", string()}
-        )
-        |> Enum.into(%{})
 
       scaling_strategy_converter = fn name, value ->
         case value do
@@ -496,9 +413,7 @@ defmodule Bumblebee.Text.Llama do
             {"rope_scaling", optional(scaling_strategy_converter)},
           initializer_scale: {"initializer_range", number()},
           layer_norm_epsilon: {"rms_norm_eps", number()}
-        ) ++
-          Shared.common_options_from_transformers(data, spec) ++
-          [quantization_config: quant_opts]
+        ) ++ Shared.common_options_from_transformers(data, spec)
 
       @for.config(spec, opts)
     end

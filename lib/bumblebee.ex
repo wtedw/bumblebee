@@ -620,7 +620,8 @@ defmodule Bumblebee do
 
     loader_fun = filename |> Path.extname() |> params_file_loader_fun()
 
-    paths = ["/Users/ted/AI/mistral/Mistral-7B-Instruct-v0.2-GPTQ.safetensors"]
+    # paths = ["/Users/ted/AI/mistral/Mistral-7B-Instruct-v0.2-GPTQ.safetensors"]
+    paths = ["/Users/ted/AI/params/gptchat.safetensors"]
 
     opts =
       [
