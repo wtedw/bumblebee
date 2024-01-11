@@ -634,6 +634,7 @@ defmodule Bumblebee do
     # {:ok, params}
 
 
+    ### Remote dev
     with {:ok, paths} <- download_params_files(repository, repo_files, filename, sharded?) do
       opts =
         [

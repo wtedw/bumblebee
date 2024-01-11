@@ -302,7 +302,7 @@ defmodule Bumblebee.Text.Mistral do
       Layers.rms_norm(decoder_outputs.hidden_state,
         name: "output_norm",
         epsilon: spec.layer_norm_epsilon,
-        type: {:bf, 16}
+        type: {:f, 16}
       )
 
     %{
@@ -322,7 +322,7 @@ defmodule Bumblebee.Text.Mistral do
       Axon.embedding(input_ids, spec.vocab_size, spec.hidden_size,
         kernel_initializer: kernel_initializer(spec),
         name: join(name, "token_embedding"),
-        type: {:bf, 16}
+        type: {:f, 16}
       )
     end
   end
@@ -349,7 +349,7 @@ defmodule Bumblebee.Text.Mistral do
       hidden_size: spec.hidden_size,
       kernel_initializer: kernel_initializer(spec),
       layer_norm:
-        &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:bf, 16}),
+        &Layers.rms_norm(&1, name: &2, epsilon: spec.layer_norm_epsilon, type: {:f, 16}),
       ffn:
         &gated_ffn(
           &1,
@@ -444,7 +444,7 @@ defmodule Bumblebee.Text.Mistral do
       kernel_initializer: kernel_initializer(spec),
       name: join(name, "output"),
       # use_bias: false,
-      type: {:bf, 16}
+      type: {:f, 16}
     )
   end
 
